@@ -315,6 +315,7 @@ function RootSettings() {
             </Tabs.Content>
             <Tabs.Content value="agents" class="settings-panel">
               <SettingsAgents
+                directory={activeDirectory()}
                 active={surface.view().tab === "agents"}
                 headerAction={<SettingsServerSwitcher />}
               />

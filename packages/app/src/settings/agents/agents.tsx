@@ -6,7 +6,6 @@ import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
-import { useWorkspaceLocation } from "@/workspaces/location"
 import { SettingsSearchEmpty } from "@/settings/search-empty"
 import { SettingsSearchField } from "@/settings/search-field"
 import { AgentEditDialog } from "./agent-edit-dialog"
@@ -22,6 +21,7 @@ interface AgentTeam {
 }
 
 export const SettingsAgents: Component<{
+  directory?: string
   active?: boolean
   headerAction?: JSX.Element
 }> = (props) => {
@@ -29,16 +29,17 @@ export const SettingsAgents: Component<{
   const sdk = useServerSDK()
   const data = useData()
   const dialog = useDialog()
-  const location = useWorkspaceLocation()
-
-  const directory = () => location().directory
 
   const [filter, setFilter] = createSignal("")
   const [selectedTeam, setSelectedTeam] = createSignal<string>("all")
 
-  const agents = () => data.location.agent.list({ directory: directory() })
+  const agents = () => {
+    const dir = props.directory
+    if (!dir) return undefined
+    return data.location.agent.list({ directory: dir })
+  }
 
-  const [config] = createResource(directory, async (dir) => {
+  const [config] = createResource(() => props.directory, async (dir) => {
     if (!dir) return []
     return await sdk.api.config.get()
   })
@@ -186,12 +187,13 @@ export const SettingsAgents: Component<{
   }
 
   const handleEdit = (agent: AgentItem) => {
+    if (!props.directory) return
+
     dialog.show(() => (
       <AgentEditDialog
         agent={agent as any}
         onSave={async (updates) => {
-          const dir = directory()
-          if (!dir) return
+          if (!props.directory) return
 
           await sdk.api.agent.update({
             agents: {
@@ -208,8 +210,7 @@ export const SettingsAgents: Component<{
   }
 
   const handleSetDefault = async (agent: AgentItem) => {
-    const dir = directory()
-    if (!dir) return
+    if (!props.directory) return
 
     await sdk.api.agent.update({
       default_agent: agent.id,
