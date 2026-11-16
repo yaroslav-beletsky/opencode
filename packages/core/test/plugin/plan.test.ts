@@ -50,6 +50,7 @@ const run = Effect.fnUntraced(function* (events: ReadonlyArray<SessionEvent.Agen
       agent: {
         get: () => Effect.die("unused agent.get"),
         list: () => Effect.die("unused agent.list"),
+        update: () => Effect.die("unused agent.update"),
         reload: () => Effect.die("unused agent.reload"),
         transform: (callback) => {
           callback({

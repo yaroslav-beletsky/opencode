@@ -155,6 +155,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Pick<Interfa
         if (ref && !isCurrentLocation(ref)) return listAgents(ref)
         return response(agents.list())
       },
+      update: () => Effect.die(new Error("agent.update not available in plugin context")),
       reload: agents.reload,
       transform: (callback) =>
         agents.transform((editor) => {
