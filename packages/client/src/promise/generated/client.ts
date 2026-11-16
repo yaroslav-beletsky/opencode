@@ -10,6 +10,8 @@ import type {
   AgentListOutput,
   AgentGetInput,
   AgentGetOutput,
+  AgentUpdateInput,
+  AgentUpdateOutput,
   PluginListInput,
   PluginListOutput,
   PluginGuiInput,
@@ -543,6 +545,19 @@ export function make(options: ClientOptions) {
             successStatus: 200,
             declaredStatuses: [400, 401, 404],
             empty: false,
+          },
+          requestOptions,
+        ),
+      update: (input: AgentUpdateInput, requestOptions?: RequestOptions) =>
+        request<AgentUpdateOutput>(
+          {
+            method: "POST",
+            path: `/api/agent`,
+            query: { location: input["location"] },
+            body: { agents: input["agents"], default_agent: input["default_agent"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401, 404],
+            empty: true,
           },
           requestOptions,
         ),

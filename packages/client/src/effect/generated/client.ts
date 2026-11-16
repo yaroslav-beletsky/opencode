@@ -16,6 +16,8 @@ import type {
   AgentListOutput,
   AgentGetInput,
   AgentGetOutput,
+  AgentUpdateInput,
+  AgentUpdateOutput,
   PluginListInput,
   PluginListOutput,
   PluginGuiInput,
@@ -389,9 +391,18 @@ const EndpointAgentGet = (raw: RawClient["server.agent"]) => (input: AgentGetInp
     ),
   )
 
+const EndpointAgentUpdate = (raw: RawClient["server.agent"]) => (input: AgentUpdateInput) =>
+  preserveEffect<AgentUpdateOutput>()(
+    raw["agent.update"]({
+      query: { location: input["location"] },
+      payload: { agents: input["agents"], default_agent: input["default_agent"] },
+    }).pipe(Effect.mapError(mapClientError)),
+  )
+
 const adaptGroupAgent = (raw: RawClient["server.agent"]) => ({
   list: EndpointAgentList(raw),
   get: EndpointAgentGet(raw),
+  update: EndpointAgentUpdate(raw),
 })
 
 const EndpointPluginList = (raw: RawClient["server.plugin"]) => (input?: PluginListInput) =>

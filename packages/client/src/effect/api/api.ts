@@ -2,13 +2,14 @@
 import type { Effect, Stream } from "effect"
 import type { Location } from "@opencode/schema/location"
 import type { Agent } from "@opencode/schema/agent"
+import type { Permission } from "@opencode/schema/permission"
+import type { Schema } from "effect"
 import type { Plugin } from "@opencode/schema/plugin"
 import type { Session } from "@opencode/schema/session"
 import type { AbsolutePath } from "@opencode/schema/schema"
 import type { Project } from "@opencode/schema/project"
 import type { RelativePath } from "@opencode/schema/schema"
 import type { Model } from "@opencode/schema/model"
-import type { Permission } from "@opencode/schema/permission"
 import type { SessionMessage } from "@opencode/schema/session-message"
 import type { SessionInbox } from "@opencode/schema/session-inbox"
 import type { PromptInput } from "@opencode/schema/prompt-input"
@@ -19,7 +20,6 @@ import type { Form } from "@opencode/schema/form"
 import type { DateTime } from "effect"
 import type { Skill } from "@opencode/schema/skill"
 import type { InstructionEntry } from "@opencode/schema/instruction-entry"
-import type { Schema } from "effect"
 import type { Event } from "@opencode/schema/event"
 import type { EventLog } from "@opencode/schema/event-log"
 import type { Workspace } from "@opencode/schema/workspace"
@@ -93,9 +93,38 @@ export type AgentGetInput = {
 export type AgentGetOutput = { readonly location: Location.PublicRef; readonly data: Agent.Info }
 export type AgentGetOperation<E = never> = (input: AgentGetInput) => Effect.Effect<AgentGetOutput, E>
 
+export type AgentUpdateInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly agents: {
+    readonly [x: string]: {
+      readonly model?:
+        | { readonly providerID: string; readonly model: string; readonly variant?: string | undefined }
+        | undefined
+      readonly request?:
+        | {
+            readonly headers?: { readonly [x: string]: string } | undefined
+            readonly body?: { readonly [x: string]: Schema.Json } | undefined
+          }
+        | undefined
+      readonly system?: string | undefined
+      readonly description?: string | undefined
+      readonly mode?: "subagent" | "primary" | "all" | undefined
+      readonly hidden?: boolean | undefined
+      readonly color?: string | undefined
+      readonly steps?: number | undefined
+      readonly disabled?: boolean | undefined
+      readonly permissions?: Permission.Ruleset | undefined
+    }
+  }
+  readonly default_agent?: string | undefined
+}
+export type AgentUpdateOutput = void
+export type AgentUpdateOperation<E = never> = (input: AgentUpdateInput) => Effect.Effect<AgentUpdateOutput, E>
+
 export interface AgentApi<E = never> {
   readonly list: AgentListOperation<E>
   readonly get: AgentGetOperation<E>
+  readonly update: AgentUpdateOperation<E>
 }
 
 export type PluginListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
