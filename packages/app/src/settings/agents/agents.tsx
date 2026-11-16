@@ -5,6 +5,7 @@ import { Badge } from "@opencode/ui/badge"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
+import { useData } from "@/runtime/server/current"
 import { SettingsSearchEmpty } from "@/settings/search-empty"
 import { SettingsSearchField } from "@/settings/search-field"
 import { Agent } from "@opencode/schema/agent"
@@ -28,19 +29,19 @@ export const SettingsAgents: Component<{
 }> = (props) => {
   const language = useLanguage()
   const sdk = useServerSDK()
+  const data = useData()
   const dialog = useDialog()
+
+  const directory = () => sdk.scope().directory
 
   const [filter, setFilter] = createSignal("")
   const [selectedTeam, setSelectedTeam] = createSignal<string>("all")
 
-  const [agents, { refetch }] = createResource(async () => {
-    const response = await sdk.agent.list()
-    return response.data
-  })
+  const agents = () => data.location.agent.list({ directory: directory() })
 
-  const [config] = createResource(async () => {
-    const entries = await sdk.config.get()
-    return entries
+  const [config] = createResource(directory, async (dir) => {
+    if (!dir) return []
+    return await sdk.api.config.get()
   })
 
   // Group agents into teams
@@ -50,13 +51,10 @@ export const SettingsAgents: Component<{
 
     const teamsMap = new Map<string, AgentTeam>()
 
-    // Find all primary agents
-
     const primaries = items.filter((a: AgentItem) => a.mode === "primary" && !a.hidden)
 
     // Create teams based on name prefixes or just use primaries
-    primaries.forEach((primary) => {
-      const prefix = primary.id.split("-")[0]
+    primaries.forEach((primary: AgentItem) => {
       const teamName = primary.name
 
       teamsMap.set(primary.id, {
@@ -68,8 +66,8 @@ export const SettingsAgents: Component<{
 
     // Assign subagents to teams based on name prefix
     items
-      .filter((a) => a.mode === "subagent")
-      .forEach((agent) => {
+      .filter((a: AgentItem) => a.mode === "subagent")
+      .forEach((agent: AgentItem) => {
         const prefix = agent.id.split("-")[0]
 
         // Find matching team by prefix
@@ -95,8 +93,8 @@ export const SettingsAgents: Component<{
 
     // Add "all" mode agents to all teams
     items
-      .filter((a) => a.mode === "all")
-      .forEach((agent) => {
+      .filter((a: AgentItem) => a.mode === "all")
+      .forEach((agent: AgentItem) => {
         teamsMap.forEach((team) => {
           team.agents.push(agent)
         })
@@ -128,7 +126,7 @@ export const SettingsAgents: Component<{
           agent.name,
           agent.description ?? "",
           agent.model?.providerID ?? "",
-          agent.model?.model ?? "",
+          agent.model?.id ?? "",
           agent.mode,
         ]
           .join(" ")
@@ -143,7 +141,7 @@ export const SettingsAgents: Component<{
 
   const defaultAgent = createMemo(() => {
     const items = agents() ?? []
-    return items.find((agent) => agent.mode === "primary" && !agent.hidden)
+    return items?.find((agent: AgentItem) => agent.mode === "primary" && !agent.hidden)
   })
 
   const getAgentSource = (agentId: string): "project" | "global" | "builtin" => {
@@ -163,14 +161,9 @@ export const SettingsAgents: Component<{
     return "builtin"
   }
 
-  const maskSensitiveValue = (value: string): string => {
-    if (value.length <= 8) return "••••••••"
-    return value.slice(0, 4) + "••••" + value.slice(-4)
-  }
-
   const formatModelName = (agent: AgentItem) => {
     if (!agent.model) return language.t("common.none")
-    return `${agent.model.providerID}/${agent.model.model}`
+    return `${agent.model.providerID}/${agent.model.id}`
   }
 
   const formatMode = (mode: AgentItem["mode"]) => {
@@ -194,33 +187,37 @@ export const SettingsAgents: Component<{
   }
 
   const handleEdit = (agent: AgentItem) => {
-    dialog.push(() => (
+    dialog.show(() => (
       <AgentEditDialog
         agent={agent}
         onSave={async (updates) => {
-          await sdk.agent.update({
+          const dir = directory()
+          if (!dir) return
+
+          await sdk.api.agent.update({
             agents: {
               [agent.id]: updates as AgentConfig,
             },
           })
 
-          // Wait a bit for config to reload
+          // Refetch will happen via global data reactivity
           await new Promise((resolve) => setTimeout(resolve, 300))
-          await refetch()
         }}
-        onClose={() => dialog.pop()}
+        onClose={() => dialog.close()}
       />
     ))
   }
 
   const handleSetDefault = async (agent: AgentItem) => {
-    await sdk.agent.update({
+    const dir = directory()
+    if (!dir) return
+
+    await sdk.api.agent.update({
       default_agent: agent.id,
       agents: {},
     })
 
     await new Promise((resolve) => setTimeout(resolve, 300))
-    await refetch()
   }
 
   return (
@@ -271,110 +268,102 @@ export const SettingsAgents: Component<{
       </div>
 
       <div class="settings-tab-body settings-agents">
-        <Show when={!agents.loading} fallback={<div class="settings-agents-status">{language.t("common.loading")}</div>}>
-          <Show
-            when={filteredAgents().length > 0}
-            fallback={
-              <Show
-                when={filter()}
-                fallback={<div class="settings-agents-status">{language.t("settings.agents.empty")}</div>}
-              >
-                <div class="settings-tab-search-empty">
-                  <SettingsSearchEmpty query={filter()} />
-                </div>
-              </Show>
-            }
-          >
-            <div class="flex flex-col gap-3">
-              <For each={filteredAgents()}>
-                {(agent) => {
-                  const isDefault = () => agent.id === defaultAgent()?.id
-                  const source = () => getAgentSource(agent.id)
+        <Show
+          when={agents() !== undefined && filteredAgents().length > 0}
+          fallback={
+            <Show
+              when={filter()}
+              fallback={<div class="settings-agents-status">{language.t("settings.agents.empty")}</div>}
+            >
+              <div class="settings-tab-search-empty">
+                <SettingsSearchEmpty query={filter()} />
+              </div>
+            </Show>
+          }
+        >
+          <div class="flex flex-col gap-3">
+            <For each={filteredAgents()}>
+              {(agent) => {
+                const isDefault = () => agent.id === defaultAgent()?.id
+                const source = () => getAgentSource(agent.id)
 
-                  return (
-                    <div class="settings-agents-item">
-                      <div class="settings-agents-item-header">
-                        <div class="settings-agents-item-title">
-                          <span class="settings-agents-item-name">{agent.name}</span>
-                          <Show when={isDefault()}>
-                            <Badge variant="accent" size="small">
-                              {language.t("settings.agents.defaultAgent")}
-                            </Badge>
-                          </Show>
-                          <Show when={agent.hidden}>
-                            <Badge variant="neutral" size="small">
-                              {language.t("settings.agents.disabled")}
-                            </Badge>
-                          </Show>
-                          <Badge variant="neutral" size="small">
-                            {language.t(`settings.agents.source.${source()}` as const)}
-                          </Badge>
-                        </div>
-                        <div class="settings-agents-item-actions">
-                          <Show when={agent.mode === "primary" && !isDefault()}>
-                            <Button size="small" variant="ghost" onClick={() => handleSetDefault(agent)}>
-                              {language.t("settings.agents.setDefault")}
-                            </Button>
-                          </Show>
-                          <Button size="small" variant="ghost" onClick={() => handleEdit(agent)}>
-                            <Icon name="edit" size="small" />
-                            {language.t("settings.agents.edit")}
+                return (
+                  <div class="settings-agents-item">
+                    <div class="settings-agents-item-header">
+                      <div class="settings-agents-item-title">
+                        <span class="settings-agents-item-name">{agent.name}</span>
+                        <Show when={isDefault()}>
+                          <Badge variant="neutral">{language.t("settings.agents.defaultAgent")}</Badge>
+                        </Show>
+                        <Show when={agent.hidden}>
+                          <Badge variant="neutral">{language.t("settings.agents.disabled")}</Badge>
+                        </Show>
+                        <Badge variant="neutral">{language.t(`settings.agents.source.${source()}` as const)}</Badge>
+                      </div>
+                      <div class="settings-agents-item-actions">
+                        <Show when={agent.mode === "primary" && !isDefault()}>
+                          <Button size="small" variant="ghost" onClick={() => handleSetDefault(agent)}>
+                            {language.t("settings.agents.setDefault")}
                           </Button>
-                        </div>
+                        </Show>
+                        <Button size="small" variant="ghost" onClick={() => handleEdit(agent)}>
+                          <Icon name="edit" size="small" />
+                          {language.t("settings.agents.edit")}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div class="settings-agents-item-id text-11-regular text-v2-text-text-muted font-mono">
+                      {agent.id}
+                    </div>
+
+                    <Show when={agent.description}>
+                      <div class="settings-agents-item-description text-12-regular text-v2-text-text-muted">
+                        {agent.description}
+                      </div>
+                    </Show>
+
+                    <div class="settings-agents-item-details">
+                      <div class="settings-agents-item-detail">
+                        <span class="settings-agents-item-detail-label">
+                          {language.t("settings.agents.mode.label")}:
+                        </span>
+                        <span class="settings-agents-item-detail-value">{formatMode(agent.mode)}</span>
                       </div>
 
-                      <div class="settings-agents-item-id text-11-regular text-v2-text-text-muted font-mono">
-                        {agent.id}
+                      <div class="settings-agents-item-detail">
+                        <span class="settings-agents-item-detail-label">{language.t("settings.agents.model")}:</span>
+                        <span class="settings-agents-item-detail-value">{formatModelName(agent)}</span>
                       </div>
 
-                      <Show when={agent.description}>
-                        <div class="settings-agents-item-description text-12-regular text-v2-text-text-muted">
-                          {agent.description}
+                      <div class="settings-agents-item-detail">
+                        <span class="settings-agents-item-detail-label">
+                          {language.t("settings.agents.temperature")}:
+                        </span>
+                        <span class="settings-agents-item-detail-value">{formatTemperature(agent)}</span>
+                      </div>
+
+                      <Show when={agent.steps}>
+                        <div class="settings-agents-item-detail">
+                          <span class="settings-agents-item-detail-label">
+                            {language.t("settings.agents.steps")}:
+                          </span>
+                          <span class="settings-agents-item-detail-value">{formatSteps(agent.steps)}</span>
                         </div>
                       </Show>
 
-                      <div class="settings-agents-item-details">
-                        <div class="settings-agents-item-detail">
-                          <span class="settings-agents-item-detail-label">
-                            {language.t("settings.agents.mode.label")}:
-                          </span>
-                          <span class="settings-agents-item-detail-value">{formatMode(agent.mode)}</span>
-                        </div>
-
-                        <div class="settings-agents-item-detail">
-                          <span class="settings-agents-item-detail-label">{language.t("settings.agents.model")}:</span>
-                          <span class="settings-agents-item-detail-value">{formatModelName(agent)}</span>
-                        </div>
-
-                        <div class="settings-agents-item-detail">
-                          <span class="settings-agents-item-detail-label">
-                            {language.t("settings.agents.temperature")}:
-                          </span>
-                          <span class="settings-agents-item-detail-value">{formatTemperature(agent)}</span>
-                        </div>
-
-                        <Show when={agent.steps}>
-                          <div class="settings-agents-item-detail">
-                            <span class="settings-agents-item-detail-label">
-                              {language.t("settings.agents.steps")}:
-                            </span>
-                            <span class="settings-agents-item-detail-value">{formatSteps(agent.steps)}</span>
-                          </div>
-                        </Show>
-
-                        <div class="settings-agents-item-detail">
-                          <span class="settings-agents-item-detail-label">
-                            {language.t("settings.agents.permissions")}:
-                          </span>
-                          <span class="settings-agents-item-detail-value">{formatPermissions(agent)}</span>
-                        </div>
+                      <div class="settings-agents-item-detail">
+                        <span class="settings-agents-item-detail-label">
+                          {language.t("settings.agents.permissions")}:
+                        </span>
+                        <span class="settings-agents-item-detail-value">{formatPermissions(agent)}</span>
                       </div>
                     </div>
-                  )
-                }}
-              </For>
-            </div>
-          </Show>
+                  </div>
+                )
+              }}
+            </For>
+          </div>
         </Show>
       </div>
     </>

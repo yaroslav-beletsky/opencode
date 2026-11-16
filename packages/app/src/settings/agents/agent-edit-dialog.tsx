@@ -1,12 +1,10 @@
-import { createSignal, For, Show, type Component } from "solid-js"
+import { createSignal, Show, type Component } from "solid-js"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode/ui/dialog"
 import { Button } from "@opencode/ui/button"
 import { TextField } from "@opencode/ui/text-field"
 import { Menu } from "@opencode/ui/menu"
 import { Switch } from "@opencode/ui/switch"
 import { useLanguage } from "@/runtime/i18n/language"
-import { useProviders } from "@/providers/catalog/providers"
-import { useModels } from "@/providers/models/models"
 import { Agent } from "@opencode/schema/agent"
 import { ConfigAgent } from "@opencode/schema/config/agent"
 
@@ -21,8 +19,6 @@ interface Props {
 
 export const AgentEditDialog: Component<Props> = (props) => {
   const language = useLanguage()
-  const providers = useProviders()
-  const models = useModels()
 
   const [saving, setSaving] = createSignal(false)
   const [error, setError] = createSignal<string>()
@@ -34,16 +30,9 @@ export const AgentEditDialog: Component<Props> = (props) => {
   )
   const [steps, setSteps] = createSignal(props.agent.steps?.toString() ?? "")
   const [enabled, setEnabled] = createSignal(!props.agent.hidden)
-  const [selectedProvider, setSelectedProvider] = createSignal(props.agent.model?.providerID ?? "")
-  const [selectedModel, setSelectedModel] = createSignal(props.agent.model?.id ?? "")
+  const [modelProvider, setModelProvider] = createSignal(props.agent.model?.providerID ?? "")
+  const [modelId, setModelId] = createSignal(props.agent.model?.id ?? "")
   const [mode, setMode] = createSignal<"primary" | "subagent" | "all">(props.agent.mode)
-
-  const providerList = () => providers.connected()
-  const modelList = () => {
-    const provider = selectedProvider()
-    if (!provider) return []
-    return models.list().filter((m) => m.provider.id === provider)
-  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -57,10 +46,10 @@ export const AgentEditDialog: Component<Props> = (props) => {
         mode: mode(),
       }
 
-      if (selectedProvider() && selectedModel()) {
+      if (modelProvider() && modelId()) {
         updates.model = {
-          providerID: selectedProvider(),
-          model: selectedModel(),
+          providerID: modelProvider(),
+          model: modelId(),
         }
       }
 
@@ -137,40 +126,20 @@ export const AgentEditDialog: Component<Props> = (props) => {
         <div class="flex gap-4">
           <div class="flex flex-1 flex-col gap-2">
             <label class="text-12-medium text-v2-text-text">{language.t("settings.providers.title")}</label>
-            <Menu>
-              <Menu.Trigger as={Button} variant="outline" class="justify-between">
-                {selectedProvider() || language.t("settings.agents.selectProvider")}
-                <span class="ml-auto">▼</span>
-              </Menu.Trigger>
-              <Menu.Portal>
-                <Menu.Content>
-                  <For each={providerList()}>
-                    {(provider) => (
-                      <Menu.Item onSelect={() => setSelectedProvider(provider.id)}>
-                        {provider.name}
-                      </Menu.Item>
-                    )}
-                  </For>
-                </Menu.Content>
-              </Menu.Portal>
-            </Menu>
+            <TextField
+              value={modelProvider()}
+              onInput={(e) => setModelProvider(e.currentTarget.value)}
+              placeholder="e.g., openai, anthropic"
+            />
           </div>
 
           <div class="flex flex-1 flex-col gap-2">
             <label class="text-12-medium text-v2-text-text">{language.t("settings.agents.model")}</label>
-            <Menu>
-              <Menu.Trigger as={Button} variant="outline" class="justify-between" disabled={!selectedProvider()}>
-                {selectedModel() || language.t("settings.agents.selectModel")}
-                <span class="ml-auto">▼</span>
-              </Menu.Trigger>
-              <Menu.Portal>
-                <Menu.Content>
-                  <For each={modelList()}>
-                    {(model) => <Menu.Item onSelect={() => setSelectedModel(model.id)}>{model.name}</Menu.Item>}
-                  </For>
-                </Menu.Content>
-              </Menu.Portal>
-            </Menu>
+            <TextField
+              value={modelId()}
+              onInput={(e) => setModelId(e.currentTarget.value)}
+              placeholder="e.g., gpt-4, claude-3-sonnet"
+            />
           </div>
         </div>
 
