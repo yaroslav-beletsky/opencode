@@ -1,13 +1,10 @@
 import { createMemo, createResource, createSignal, For, Show, type Component, type JSX } from "solid-js"
-import { createStore } from "solid-js/store"
 import { Icon } from "@opencode/ui/icon"
 import { Button } from "@opencode/ui/button"
 import { Badge } from "@opencode/ui/badge"
 import { useDialog } from "@opencode/ui/context/dialog"
-import { useToast } from "@opencode/ui/toast"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
-import { SettingsList } from "@/settings/list"
 import { SettingsSearchEmpty } from "@/settings/search-empty"
 import { SettingsSearchField } from "@/settings/search-field"
 import { Agent } from "@opencode/schema/agent"
@@ -32,18 +29,17 @@ export const SettingsAgents: Component<{
   const language = useLanguage()
   const sdk = useServerSDK()
   const dialog = useDialog()
-  const toast = useToast()
 
   const [filter, setFilter] = createSignal("")
   const [selectedTeam, setSelectedTeam] = createSignal<string>("all")
 
   const [agents, { refetch }] = createResource(async () => {
-    const response = await sdk.client.agent.list()
+    const response = await sdk.agent.list()
     return response.data
   })
 
   const [config] = createResource(async () => {
-    const entries = await sdk.client.config.get()
+    const entries = await sdk.config.get()
     return entries
   })
 
@@ -55,7 +51,8 @@ export const SettingsAgents: Component<{
     const teamsMap = new Map<string, AgentTeam>()
 
     // Find all primary agents
-    const primaries = items.filter((a) => a.mode === "primary" && !a.hidden)
+
+    const primaries = items.filter((a: AgentItem) => a.mode === "primary" && !a.hidden)
 
     // Create teams based on name prefixes or just use primaries
     primaries.forEach((primary) => {
@@ -201,29 +198,15 @@ export const SettingsAgents: Component<{
       <AgentEditDialog
         agent={agent}
         onSave={async (updates) => {
-          try {
-            await sdk.client.agent.update({
-              agents: {
-                [agent.id]: updates as AgentConfig,
-              },
-            })
+          await sdk.agent.update({
+            agents: {
+              [agent.id]: updates as AgentConfig,
+            },
+          })
 
-            // Wait a bit for config to reload
-            await new Promise((resolve) => setTimeout(resolve, 300))
-            await refetch()
-
-            toast.show({
-              title: language.t("settings.agents.saved"),
-              variant: "success",
-            })
-          } catch (error) {
-            toast.show({
-              title: language.t("settings.agents.saveFailed"),
-              description: error instanceof Error ? error.message : String(error),
-              variant: "error",
-            })
-            throw error
-          }
+          // Wait a bit for config to reload
+          await new Promise((resolve) => setTimeout(resolve, 300))
+          await refetch()
         }}
         onClose={() => dialog.pop()}
       />
@@ -231,26 +214,13 @@ export const SettingsAgents: Component<{
   }
 
   const handleSetDefault = async (agent: AgentItem) => {
-    try {
-      await sdk.client.agent.update({
-        default_agent: agent.id,
-        agents: {},
-      })
+    await sdk.agent.update({
+      default_agent: agent.id,
+      agents: {},
+    })
 
-      await new Promise((resolve) => setTimeout(resolve, 300))
-      await refetch()
-
-      toast.show({
-        title: language.t("settings.agents.saved"),
-        variant: "success",
-      })
-    } catch (error) {
-      toast.show({
-        title: language.t("settings.agents.saveFailed"),
-        description: error instanceof Error ? error.message : String(error),
-        variant: "error",
-      })
-    }
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await refetch()
   }
 
   return (

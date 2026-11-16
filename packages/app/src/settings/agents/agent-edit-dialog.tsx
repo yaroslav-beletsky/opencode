@@ -1,4 +1,4 @@
-import { createSignal, createResource, For, Show, type Component } from "solid-js"
+import { createSignal, For, Show, type Component } from "solid-js"
 import { Dialog, DialogBody, DialogFooter, DialogHeader, DialogTitle } from "@opencode/ui/dialog"
 import { Button } from "@opencode/ui/button"
 import { TextField } from "@opencode/ui/text-field"
@@ -21,8 +21,8 @@ interface Props {
 
 export const AgentEditDialog: Component<Props> = (props) => {
   const language = useLanguage()
-  const providers = useProviders(() => undefined)
-  const models = useModels(() => undefined)
+  const providers = useProviders()
+  const models = useModels()
 
   const [saving, setSaving] = createSignal(false)
   const [error, setError] = createSignal<string>()
@@ -35,10 +35,10 @@ export const AgentEditDialog: Component<Props> = (props) => {
   const [steps, setSteps] = createSignal(props.agent.steps?.toString() ?? "")
   const [enabled, setEnabled] = createSignal(!props.agent.hidden)
   const [selectedProvider, setSelectedProvider] = createSignal(props.agent.model?.providerID ?? "")
-  const [selectedModel, setSelectedModel] = createSignal(props.agent.model?.model ?? "")
+  const [selectedModel, setSelectedModel] = createSignal(props.agent.model?.id ?? "")
   const [mode, setMode] = createSignal<"primary" | "subagent" | "all">(props.agent.mode)
 
-  const providerList = () => providers.list()
+  const providerList = () => providers.connected()
   const modelList = () => {
     const provider = selectedProvider()
     if (!provider) return []
