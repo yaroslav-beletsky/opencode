@@ -3331,6 +3331,34 @@ export type AgentGetInput = {
 
 export type AgentGetOutput = { location: LocationPublicRef; data: AgentInfo }
 
+export type AgentUpdateInput = {
+  readonly location?: { readonly directory?: string | undefined } | undefined
+  readonly agents: {
+    readonly [x: string]: {
+      readonly model?: string | { readonly providerID: string; readonly model: string; readonly variant?: string }
+      readonly request?: {
+        readonly headers?: { readonly [x: string]: string }
+        readonly body?: { readonly [x: string]: JsonValue }
+      }
+      readonly system?: string
+      readonly description?: string
+      readonly mode?: "subagent" | "primary" | "all"
+      readonly hidden?: boolean
+      readonly color?: string
+      readonly steps?: number
+      readonly disabled?: boolean
+      readonly permissions?: ReadonlyArray<{
+        readonly action: string
+        readonly resource: string
+        readonly effect: "allow" | "deny" | "ask"
+      }>
+    }
+  }
+  readonly default_agent?: string | null | undefined
+}
+
+export type AgentUpdateOutput = void
+
 export type PluginListInput = { readonly location?: { readonly directory?: string | undefined } | undefined }
 
 export type PluginListOutput = { location: LocationPublicRef; data: Array<PluginInfo> }
