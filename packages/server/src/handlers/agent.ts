@@ -102,8 +102,13 @@ export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers)
           return v1
         }
 
-        // Helper to check if prompt is a file reference
-        const isFileReference = (prompt: string) => {
+        // Helper to check if prompt contains any file references (including composite)
+        const containsFileReference = (prompt: string) => {
+          return typeof prompt === "string" && /\{file:[^}]+\}/g.test(prompt)
+        }
+
+        // Helper to extract single file reference
+        const isSingleFileReference = (prompt: string) => {
           return typeof prompt === "string" && prompt.match(/^\{file:(.+)\}$/)
         }
 
@@ -112,12 +117,27 @@ export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers)
           const agentPath = [agentsKey, agentID]
           const existingAgent = parsed[agentsKey]?.[agentID]
 
+          // Get the prompt field name for this format
+          const promptField = isV1 ? "prompt" : "system"
+          const existingPrompt = existingAgent?.[promptField]
+
+          // Check if client is trying to overwrite file references
+          if (existingPrompt && containsFileReference(existingPrompt)) {
+            const newPrompt = isV1 ? (agentConfig as any).prompt : (agentConfig as any).system
+            if (newPrompt !== undefined && newPrompt !== existingPrompt) {
+              // Client is trying to replace a file reference with inline text
+              return yield* new InvalidRequestError({
+                message: `Cannot replace file reference prompt with inline text. Agent "${agentID}" has prompt with {file:...} references. To edit, modify the referenced file(s) directly, or edit the raw config to remove the references first.`,
+              })
+            }
+          }
+
           // Convert to V1 format if needed
           const configToWrite = isV1 ? toV1Format(agentConfig, existingAgent) : agentConfig
 
-          // Handle file-referenced prompts
+          // Handle single file-referenced prompts (write to file, keep reference)
           if (isV1 && existingAgent?.prompt) {
-            const fileMatch = isFileReference(existingAgent.prompt)
+            const fileMatch = isSingleFileReference(existingAgent.prompt)
             if (fileMatch && configToWrite.prompt && configToWrite.prompt !== existingAgent.prompt) {
               // Write the prompt to the referenced file
               const filePath = fileMatch[1]

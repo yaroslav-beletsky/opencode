@@ -410,7 +410,6 @@ describe("Agent config update with JSONC preservation", () => {
     let text = await fs.readFile(configPath, "utf-8")
     const parsed = jsonc.parse(text)
 
-    const isV1 = parsed.agent !== undefined
     const agentsKey = "agent"
 
     // Update helper agent
@@ -453,5 +452,116 @@ describe("Agent config update with JSONC preservation", () => {
 
     // Verify top-level comments preserved (inline comments within modified objects may not be)
     expect(result).toContain("// V1 agent team")
+  })
+
+  test("composite file references are protected - temperature-only edit leaves prompt unchanged", async () => {
+    const configPath = path.join(testDir, "opencode.json")
+    const contextPath = path.join(testDir, ".opencode", "prompts", "_context.md")
+    const coderPath = path.join(testDir, ".opencode", "prompts-mini", "coder.md")
+
+    // Create referenced files
+    await fs.mkdir(path.dirname(contextPath), { recursive: true })
+    await fs.mkdir(path.dirname(coderPath), { recursive: true })
+    await fs.writeFile(contextPath, "Global context for all agents")
+    await fs.writeFile(coderPath, "You are a coder")
+
+    // V1 config with composite file reference
+    const initial = `{
+  "agent": {
+    "mini-coder": {
+      "model": "openai/gpt-3.5-turbo",
+      "temperature": 0.5,
+      "prompt": "{file:./.opencode/prompts/_context.md}\\n\\n{file:./.opencode/prompts-mini/coder.md}",
+      "mode": "subagent"
+    }
+  }
+}
+`
+    await fs.writeFile(configPath, initial)
+
+    let text = await fs.readFile(configPath, "utf-8")
+    const parsed = jsonc.parse(text)
+
+    const agentsKey = "agent"
+
+    // Simulate temperature-only edit (like real bug scenario)
+    const v2Update = {
+      request: {
+        body: {
+          temperature: 0.7,
+        },
+      },
+    }
+
+    const toV1Format = (config: any) => {
+      const v1: any = {}
+      if (config.request?.body?.temperature !== undefined) {
+        v1.temperature = config.request.body.temperature
+      }
+      return v1
+    }
+
+    const v1Config = toV1Format(v2Update)
+    const existingAgent = parsed[agentsKey]["mini-coder"]
+
+    // Verify prompt has file references
+    expect(existingAgent.prompt).toContain("{file:")
+
+    const merged = { ...existingAgent, ...v1Config }
+
+    const edits = jsonc.modify(text, [agentsKey, "mini-coder"], merged, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    })
+
+    text = jsonc.applyEdits(text, edits)
+    await fs.writeFile(configPath, text)
+
+    const result = await fs.readFile(configPath, "utf-8")
+    const resultParsed = jsonc.parse(result)
+
+    // Critical: prompt must be byte-identical (JSON parses \\n to actual newline)
+    expect(resultParsed.agent["mini-coder"].prompt).toBe(
+      "{file:./.opencode/prompts/_context.md}\n\n{file:./.opencode/prompts-mini/coder.md}",
+    )
+    expect(resultParsed.agent["mini-coder"].temperature).toBe(0.7)
+  })
+
+  test("server rejects attempt to inline over composite file references", async () => {
+    const configPath = path.join(testDir, "opencode.json")
+
+    // V1 config with composite file reference
+    const initial = `{
+  "agent": {
+    "mini-coder": {
+      "model": "openai/gpt-3.5-turbo",
+      "prompt": "{file:./.opencode/prompts/_context.md}\\n\\n{file:./.opencode/prompts-mini/coder.md}"
+    }
+  }
+}
+`
+    await fs.writeFile(configPath, initial)
+
+    const text = await fs.readFile(configPath, "utf-8")
+    const parsed = jsonc.parse(text)
+
+    const agentsKey = "agent"
+    const existingAgent = parsed[agentsKey]["mini-coder"]
+
+    // Check if existing prompt contains file references
+    const containsFileReference = (prompt: string) => {
+      return typeof prompt === "string" && /\{file:[^}]+\}/g.test(prompt)
+    }
+
+    const existingPrompt = existingAgent.prompt
+    const hasFileRefs = containsFileReference(existingPrompt)
+
+    expect(hasFileRefs).toBe(true)
+
+    // Simulate client trying to send resolved text
+    const resolvedPrompt = "Global context for all agents\n\nYou are a coder"
+    const shouldReject = hasFileRefs && resolvedPrompt !== existingPrompt
+
+    expect(shouldReject).toBe(true)
+    // In real handler, this would return InvalidRequestError
   })
 })

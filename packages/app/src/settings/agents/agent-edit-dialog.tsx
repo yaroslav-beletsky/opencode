@@ -27,16 +27,26 @@ export const AgentEditDialog: Component<Props> = (props) => {
   const [saving, setSaving] = createSignal(false)
   const [error, setError] = createSignal<string>()
 
-  const [description, setDescription] = createSignal(props.agent.description ?? "")
-  const [system, setSystem] = createSignal(props.agent.system ?? "")
-  const [temperature, setTemperature] = createSignal(
-    props.agent.request.body.temperature?.toString() ?? "0.7",
-  )
-  const [steps, setSteps] = createSignal(props.agent.steps?.toString() ?? "")
-  const [enabled, setEnabled] = createSignal(!props.agent.hidden)
-  const [selectedProvider, setSelectedProvider] = createSignal(props.agent.model?.providerID ?? "")
-  const [selectedModel, setSelectedModel] = createSignal(props.agent.model?.id ?? "")
-  const [mode, setMode] = createSignal<"primary" | "subagent" | "all">(props.agent.mode)
+  // Track initial values for dirty detection
+  const initial = {
+    description: props.agent.description ?? "",
+    system: props.agent.system ?? "",
+    temperature: props.agent.request.body.temperature?.toString() ?? "0.7",
+    steps: props.agent.steps?.toString() ?? "",
+    enabled: !props.agent.hidden,
+    provider: props.agent.model?.providerID ?? "",
+    model: props.agent.model?.id ?? "",
+    mode: props.agent.mode,
+  }
+
+  const [description, setDescription] = createSignal(initial.description)
+  const [system, setSystem] = createSignal(initial.system)
+  const [temperature, setTemperature] = createSignal(initial.temperature)
+  const [steps, setSteps] = createSignal(initial.steps)
+  const [enabled, setEnabled] = createSignal(initial.enabled)
+  const [selectedProvider, setSelectedProvider] = createSignal(initial.provider)
+  const [selectedModel, setSelectedModel] = createSignal(initial.model)
+  const [mode, setMode] = createSignal<"primary" | "subagent" | "all">(initial.mode)
 
   const providerList = createMemo(() => providers.connected())
   const modelList = createMemo(() => {
@@ -50,14 +60,28 @@ export const AgentEditDialog: Component<Props> = (props) => {
     setError(undefined)
 
     try {
-      const updates: Record<string, unknown> = {
-        description: description() || undefined,
-        system: system() || undefined,
-        hidden: !enabled(),
-        mode: mode(),
+      const updates: Record<string, unknown> = {}
+
+      // Only include fields that actually changed
+      if (description() !== initial.description) {
+        updates.description = description() || undefined
       }
 
-      if (selectedProvider() && selectedModel()) {
+      // CRITICAL: Only send system if it was actually edited
+      if (system() !== initial.system) {
+        updates.system = system() || undefined
+      }
+
+      if (!enabled() !== !initial.enabled) {
+        updates.hidden = !enabled()
+      }
+
+      if (mode() !== initial.mode) {
+        updates.mode = mode()
+      }
+
+      const modelChanged = selectedProvider() !== initial.provider || selectedModel() !== initial.model
+      if (modelChanged && selectedProvider() && selectedModel()) {
         updates.model = {
           providerID: selectedProvider(),
           model: selectedModel(),
@@ -65,7 +89,7 @@ export const AgentEditDialog: Component<Props> = (props) => {
       }
 
       const tempValue = parseFloat(temperature())
-      if (!isNaN(tempValue)) {
+      if (!isNaN(tempValue) && temperature() !== initial.temperature) {
         updates.request = {
           body: {
             temperature: tempValue,
@@ -74,8 +98,15 @@ export const AgentEditDialog: Component<Props> = (props) => {
       }
 
       const stepsValue = parseInt(steps())
-      if (!isNaN(stepsValue) && stepsValue > 0) {
+      const stepsChanged = steps() !== initial.steps
+      if (stepsChanged && !isNaN(stepsValue) && stepsValue > 0) {
         updates.steps = stepsValue
+      }
+
+      // If nothing changed, just close
+      if (Object.keys(updates).length === 0) {
+        props.onClose()
+        return
       }
 
       await props.onSave(updates as Partial<AgentConfig>)
