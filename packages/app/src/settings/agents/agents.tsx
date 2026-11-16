@@ -6,14 +6,13 @@ import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
+import { useWorkspaceLocation } from "@/workspaces/location"
 import { SettingsSearchEmpty } from "@/settings/search-empty"
 import { SettingsSearchField } from "@/settings/search-field"
-import { ConfigAgent } from "@opencode/schema/config/agent"
 import { AgentEditDialog } from "./agent-edit-dialog"
 import "@/settings/settings.css"
 import "./agents.css"
 
-type AgentConfig = typeof ConfigAgent.Info.Type
 type AgentItem = NonNullable<ReturnType<ReturnType<typeof useData>["location"]["agent"]["list"]>>[number]
 
 interface AgentTeam {
@@ -30,8 +29,9 @@ export const SettingsAgents: Component<{
   const sdk = useServerSDK()
   const data = useData()
   const dialog = useDialog()
+  const location = useWorkspaceLocation()
 
-  const directory = () => sdk.scope.directory
+  const directory = () => location().directory
 
   const [filter, setFilter] = createSignal("")
   const [selectedTeam, setSelectedTeam] = createSignal<string>("all")
