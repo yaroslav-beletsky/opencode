@@ -22,7 +22,7 @@ interface Props {
 export const AgentEditDialog: Component<Props> = (props) => {
   const language = useLanguage()
   const providers = useProviders(() => undefined)
-  const models = useModels(() => undefined)
+  const models = useModels()
 
   const [saving, setSaving] = createSignal(false)
   const [error, setError] = createSignal<string>()
