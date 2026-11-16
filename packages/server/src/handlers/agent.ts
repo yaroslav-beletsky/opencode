@@ -7,6 +7,7 @@ import { Api } from "../api"
 import { response } from "../location"
 import { AgentNotFoundError } from "@opencode/protocol/errors"
 import path from "path"
+import * as jsonc from "jsonc-parser"
 
 export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers) =>
   handlers
@@ -33,21 +34,61 @@ export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers)
 
         const text = (yield* fs.readFileStringSafe(configPath)) ?? "{}\n"
 
-        const parsed = JSON.parse(text)
+        // Parse with jsonc-parser to handle comments
+        const parseErrors: jsonc.ParseError[] = []
+        const parsed = jsonc.parse(text, parseErrors, { allowTrailingComma: true })
 
-        parsed.agents = parsed.agents || {}
+        if (parseErrors.length > 0) {
+          return yield* Effect.fail(
+            new Error(`Failed to parse opencode.json: ${parseErrors.map((e) => e.error).join(", ")}`),
+          )
+        }
+
+        // Build edits to apply
+        const edits: jsonc.Edit[] = []
+
+        // Ensure agents object exists
+        if (!parsed.agents) {
+          edits.push(...jsonc.modify(text, ["agents"], {}, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+        }
+
+        // Update each agent
         for (const [agentID, agentConfig] of Object.entries(ctx.payload.agents)) {
-          parsed.agents[agentID] = agentConfig
+          const agentPath = ["agents", agentID]
+          const existingAgent = parsed.agents?.[agentID]
+
+          if (existingAgent) {
+            // Merge with existing agent to preserve unmodified fields
+            const merged = { ...existingAgent, ...agentConfig }
+            edits.push(
+              ...jsonc.modify(text, agentPath, merged, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
+            )
+          } else {
+            // Add new agent
+            edits.push(
+              ...jsonc.modify(text, agentPath, agentConfig, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
+            )
+          }
         }
 
+        // Update default_agent if provided
         if (ctx.payload.default_agent !== undefined) {
-          parsed.default_agent = ctx.payload.default_agent
+          edits.push(
+            ...jsonc.modify(text, ["default_agent"], ctx.payload.default_agent, {
+              formattingOptions: { insertSpaces: true, tabSize: 2 },
+            }),
+          )
         }
 
-        const updated = JSON.stringify(parsed, null, 2)
+        // Apply all edits
+        const updated = jsonc.applyEdits(text, edits)
 
-        yield* fs.writeWithDirs(configPath, updated.endsWith("\n") ? updated : `${updated}\n`)
+        // Ensure trailing newline
+        const final = updated.endsWith("\n") ? updated : `${updated}\n`
 
+        yield* fs.writeWithDirs(configPath, final)
+
+        // Give config watcher time to reload
         yield* Effect.sleep("100 millis")
       }),
     ),
