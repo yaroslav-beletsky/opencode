@@ -122,8 +122,9 @@ export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers)
           const existingPrompt = existingAgent?.[promptField]
 
           // Check if client is trying to overwrite file references
+          // Client may send V2 payload (system) even for V1 files, so check both
           if (existingPrompt && containsFileReference(existingPrompt)) {
-            const newPrompt = isV1 ? (agentConfig as any).prompt : (agentConfig as any).system
+            const newPrompt = (agentConfig as any).system ?? (agentConfig as any).prompt
             if (newPrompt !== undefined && newPrompt !== existingPrompt) {
               // Client is trying to replace a file reference with inline text
               return yield* new InvalidRequestError({

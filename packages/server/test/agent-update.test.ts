@@ -564,4 +564,62 @@ describe("Agent config update with JSONC preservation", () => {
     expect(shouldReject).toBe(true)
     // In real handler, this would return InvalidRequestError
   })
+
+  test("server rejects V2 payload with system field against V1 file with composite prompt", async () => {
+    const configPath = path.join(testDir, "opencode.json")
+
+    // V1 config with composite file reference (user's real scenario)
+    const initial = `{
+  "agent": {
+    "mini-coder": {
+      "model": "openai/gpt-3.5-turbo",
+      "temperature": 0.5,
+      "prompt": "{file:./.opencode/prompts/_context.md}\\n\\n{file:./.opencode/prompts-mini/coder.md}",
+      "mode": "subagent"
+    }
+  }
+}
+`
+    await fs.writeFile(configPath, initial)
+
+    const text = await fs.readFile(configPath, "utf-8")
+    const parsed = jsonc.parse(text)
+
+    const isV1 = parsed.agent !== undefined
+    const agentsKey = "agent"
+    const existingAgent = parsed[agentsKey]["mini-coder"]
+
+    expect(isV1).toBe(true)
+
+    // Simulate V2-shaped payload from dialog (has "system" not "prompt")
+    const v2Payload = {
+      system: "Global context for all agents\n\nYou are a coder", // Resolved text
+      request: {
+        body: {
+          temperature: 0.3,
+        },
+      },
+    }
+
+    // Server validation: check both system and prompt fields
+    const containsFileReference = (prompt: string) => {
+      return typeof prompt === "string" && /\{file:[^}]+\}/g.test(prompt)
+    }
+
+    const promptField = isV1 ? "prompt" : "system"
+    const existingPrompt = existingAgent[promptField]
+    const hasFileRefs = containsFileReference(existingPrompt)
+
+    expect(hasFileRefs).toBe(true)
+
+    // Check BOTH system and prompt (client may send V2 payload for V1 file)
+    const newPrompt = (v2Payload as any).system ?? (v2Payload as any).prompt
+    const shouldReject = hasFileRefs && newPrompt !== undefined && newPrompt !== existingPrompt
+
+    expect(shouldReject).toBe(true)
+    expect(newPrompt).toBe("Global context for all agents\n\nYou are a coder")
+
+    // If this passed through, file would be corrupted
+    // With fix, server returns 400 and file stays byte-identical
+  })
 })
