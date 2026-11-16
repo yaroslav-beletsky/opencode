@@ -8,14 +8,13 @@ import { useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
 import { SettingsSearchEmpty } from "@/settings/search-empty"
 import { SettingsSearchField } from "@/settings/search-field"
-import { Agent } from "@opencode/schema/agent"
 import { ConfigAgent } from "@opencode/schema/config/agent"
 import { AgentEditDialog } from "./agent-edit-dialog"
 import "@/settings/settings.css"
 import "./agents.css"
 
-type AgentItem = typeof Agent.Info.Type
 type AgentConfig = typeof ConfigAgent.Info.Type
+type AgentItem = NonNullable<ReturnType<ReturnType<typeof useData>["location"]["agent"]["list"]>>[number]
 
 interface AgentTeam {
   name: string
@@ -32,7 +31,7 @@ export const SettingsAgents: Component<{
   const data = useData()
   const dialog = useDialog()
 
-  const directory = () => sdk.scope().directory
+  const directory = () => sdk.scope.directory
 
   const [filter, setFilter] = createSignal("")
   const [selectedTeam, setSelectedTeam] = createSignal<string>("all")
@@ -189,14 +188,14 @@ export const SettingsAgents: Component<{
   const handleEdit = (agent: AgentItem) => {
     dialog.show(() => (
       <AgentEditDialog
-        agent={agent}
+        agent={agent as any}
         onSave={async (updates) => {
           const dir = directory()
           if (!dir) return
 
           await sdk.api.agent.update({
             agents: {
-              [agent.id]: updates as AgentConfig,
+              [agent.id]: updates as any,
             },
           })
 
