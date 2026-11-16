@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { Api } from "../api"
 import { response } from "../location"
-import { AgentNotFoundError } from "@opencode/protocol/errors"
+import { AgentNotFoundError, InvalidRequestError } from "@opencode/protocol/errors"
 import path from "path"
 import * as jsonc from "jsonc-parser"
 
@@ -32,41 +32,123 @@ export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers)
 
         const configPath = path.join(location.directory, "opencode.json")
 
-        const text = (yield* fs.readFileStringSafe(configPath)) ?? "{}\n"
+        const text = (yield* fs.readFileStringSafe(configPath).pipe(
+          Effect.mapError(
+            (error) =>
+              new InvalidRequestError({
+                message: `Failed to read opencode.json: ${String(error)}`,
+              }),
+          ),
+        )) ?? "{}\n"
 
         // Parse with jsonc-parser to handle comments
         const parseErrors: jsonc.ParseError[] = []
         const parsed = jsonc.parse(text, parseErrors, { allowTrailingComma: true })
 
         if (parseErrors.length > 0) {
-          return yield* Effect.fail(
-            new Error(`Failed to parse opencode.json: ${parseErrors.map((e) => e.error).join(", ")}`),
-          )
+          return yield* new InvalidRequestError({
+            message: `Failed to parse opencode.json: ${parseErrors.map((e) => e.error).join(", ")}`,
+          })
         }
+
+        // Detect V1 format (uses "agent" instead of "agents")
+        const isV1 = parsed.agent !== undefined && typeof parsed.agent === "object"
+        const agentsKey = isV1 ? "agent" : "agents"
 
         // Build edits to apply
         const edits: jsonc.Edit[] = []
 
-        // Ensure agents object exists
-        if (!parsed.agents) {
-          edits.push(...jsonc.modify(text, ["agents"], {}, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+        // Ensure agents/agent object exists
+        if (!parsed[agentsKey]) {
+          edits.push(
+            ...jsonc.modify(text, [agentsKey], {}, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
+          )
+        }
+
+        // Helper to convert V2 format to V1 format
+        const toV1Format = (config: any, existingAgent?: any) => {
+          const v1: any = {}
+
+          // Model: convert {providerID, model} to "providerID/model"
+          if (config.model) {
+            if (typeof config.model === "object" && config.model.providerID && config.model.model) {
+              v1.model = `${config.model.providerID}/${config.model.model}`
+            } else if (typeof config.model === "string") {
+              v1.model = config.model
+            }
+          }
+
+          // Temperature: extract from request.body.temperature
+          if (config.request?.body?.temperature !== undefined) {
+            v1.temperature = config.request.body.temperature
+          } else if (config.temperature !== undefined) {
+            v1.temperature = config.temperature
+          }
+
+          // Prompt: use system or keep existing prompt reference
+          if (config.system !== undefined) {
+            v1.prompt = config.system
+          } else if (config.prompt !== undefined) {
+            v1.prompt = config.prompt
+          }
+
+          // Other V1 fields
+          if (config.description !== undefined) v1.description = config.description
+          if (config.mode !== undefined) v1.mode = config.mode
+          if (config.disabled !== undefined) v1.disable = config.disabled
+          if (config.disable !== undefined) v1.disable = config.disable
+          if (config.steps !== undefined) v1.steps = config.steps
+
+          return v1
+        }
+
+        // Helper to check if prompt is a file reference
+        const isFileReference = (prompt: string) => {
+          return typeof prompt === "string" && prompt.match(/^\{file:(.+)\}$/)
         }
 
         // Update each agent
         for (const [agentID, agentConfig] of Object.entries(ctx.payload.agents)) {
-          const agentPath = ["agents", agentID]
-          const existingAgent = parsed.agents?.[agentID]
+          const agentPath = [agentsKey, agentID]
+          const existingAgent = parsed[agentsKey]?.[agentID]
+
+          // Convert to V1 format if needed
+          const configToWrite = isV1 ? toV1Format(agentConfig, existingAgent) : agentConfig
+
+          // Handle file-referenced prompts
+          if (isV1 && existingAgent?.prompt) {
+            const fileMatch = isFileReference(existingAgent.prompt)
+            if (fileMatch && configToWrite.prompt && configToWrite.prompt !== existingAgent.prompt) {
+              // Write the prompt to the referenced file
+              const filePath = fileMatch[1]
+              const absolutePath = path.isAbsolute(filePath)
+                ? filePath
+                : path.join(location.directory, filePath)
+
+              yield* fs.writeWithDirs(absolutePath, configToWrite.prompt).pipe(
+                Effect.mapError(
+                  (error) =>
+                    new InvalidRequestError({
+                      message: `Failed to write prompt file ${absolutePath}: ${String(error)}`,
+                    }),
+                ),
+              )
+
+              // Keep the {file:...} reference in the config
+              configToWrite.prompt = existingAgent.prompt
+            }
+          }
 
           if (existingAgent) {
             // Merge with existing agent to preserve unmodified fields
-            const merged = { ...existingAgent, ...agentConfig }
+            const merged = { ...existingAgent, ...configToWrite }
             edits.push(
               ...jsonc.modify(text, agentPath, merged, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
             )
           } else {
             // Add new agent
             edits.push(
-              ...jsonc.modify(text, agentPath, agentConfig, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
+              ...jsonc.modify(text, agentPath, configToWrite, { formattingOptions: { insertSpaces: true, tabSize: 2 } }),
             )
           }
         }
@@ -86,7 +168,14 @@ export const AgentHandler = HttpApiBuilder.group(Api, "server.agent", (handlers)
         // Ensure trailing newline
         const final = updated.endsWith("\n") ? updated : `${updated}\n`
 
-        yield* fs.writeWithDirs(configPath, final)
+        yield* fs.writeWithDirs(configPath, final).pipe(
+          Effect.mapError(
+            (error) =>
+              new InvalidRequestError({
+                message: `Failed to write opencode.json: ${String(error)}`,
+              }),
+          ),
+        )
 
         // Give config watcher time to reload
         yield* Effect.sleep("100 millis")

@@ -1,11 +1,13 @@
-import { createMemo, createResource, createSignal, For, Show, type Component, type JSX } from "solid-js"
+import { createMemo, createResource, createSignal, createEffect, For, Show, type Component, type JSX } from "solid-js"
 import { Icon } from "@opencode/ui/icon"
 import { Button } from "@opencode/ui/button"
 import { Badge } from "@opencode/ui/badge"
+import { Menu } from "@opencode/ui/menu"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
-import { useData } from "@/runtime/server/current"
+import { useData, useServer } from "@/runtime/server/current"
+import { displayName } from "@opencode/ui/project-avatar"
 import { SettingsSearchEmpty } from "@/settings/search-empty"
 import { SettingsSearchField } from "@/settings/search-field"
 import { AgentEditDialog } from "./agent-edit-dialog"
@@ -29,17 +31,38 @@ export const SettingsAgents: Component<{
   const sdk = useServerSDK()
   const data = useData()
   const dialog = useDialog()
+  const context = useServer().ctx
+  
+  const projects = createMemo(() => context.projects.unique())
+  const usedProjects = createMemo(() => context.projects.used())
+  
+  // Select directory: prefer passed directory, fallback to most recent project
+  const [selectedDirectory, setSelectedDirectory] = createSignal<string | undefined>(undefined)
+  
+  createEffect(() => {
+    // Initialize with passed directory or most recent project
+    if (props.directory) {
+      setSelectedDirectory(props.directory)
+    } else if (!selectedDirectory() && usedProjects().length > 0) {
+      setSelectedDirectory(usedProjects()[0].worktree)
+    }
+  })
+  
+  const currentDirectory = createMemo(() => selectedDirectory())
+  const currentProject = createMemo(() => 
+    projects().find(p => p.worktree === currentDirectory())
+  )
 
   const [filter, setFilter] = createSignal("")
   const [selectedTeam, setSelectedTeam] = createSignal<string>("all")
 
   const agents = () => {
-    const dir = props.directory
+    const dir = currentDirectory()
     if (!dir) return undefined
     return data.location.agent.list({ directory: dir })
   }
 
-  const [config] = createResource(() => props.directory, async (dir) => {
+  const [config] = createResource(currentDirectory, async (dir) => {
     if (!dir) return []
     return await sdk.api.config.get()
   })
@@ -187,13 +210,15 @@ export const SettingsAgents: Component<{
   }
 
   const handleEdit = (agent: AgentItem) => {
-    if (!props.directory) return
+    const dir = currentDirectory()
+    if (!dir) return
 
     dialog.show(() => (
       <AgentEditDialog
         agent={agent as any}
         onSave={async (updates) => {
-          if (!props.directory) return
+          const dir = currentDirectory()
+          if (!dir) return
 
           await sdk.api.agent.update({
             agents: {
@@ -210,7 +235,8 @@ export const SettingsAgents: Component<{
   }
 
   const handleSetDefault = async (agent: AgentItem) => {
-    if (!props.directory) return
+    const dir = currentDirectory()
+    if (!dir) return
 
     await sdk.api.agent.update({
       default_agent: agent.id,
@@ -232,6 +258,29 @@ export const SettingsAgents: Component<{
           </div>
           <div class="settings-tab-header-actions">{props.headerAction}</div>
         </div>
+        
+        <Show when={projects().length > 0}>
+          <div class="flex gap-2 items-center">
+            <span class="text-12-medium text-v2-text-text">{language.t("settings.agents.project")}:</span>
+            <Menu>
+              <Menu.Trigger as={Button} variant="outline" class="justify-between min-w-48">
+                {currentProject() ? displayName(currentProject()!) : language.t("settings.agents.selectProject")}
+                <span class="ml-auto">▼</span>
+              </Menu.Trigger>
+              <Menu.Portal>
+                <Menu.Content>
+                  <For each={projects()}>
+                    {(project) => (
+                      <Menu.Item onSelect={() => setSelectedDirectory(project.worktree)}>
+                        {displayName(project)}
+                      </Menu.Item>
+                    )}
+                  </For>
+                </Menu.Content>
+              </Menu.Portal>
+            </Menu>
+          </div>
+        </Show>
 
         <Show when={teams().length > 1}>
           <div class="flex gap-2 items-center">

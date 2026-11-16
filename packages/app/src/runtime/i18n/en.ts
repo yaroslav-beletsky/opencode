@@ -1294,8 +1294,10 @@ export const dict = {
   "settings.agents.allTeams": "All teams",
   "settings.agents.setDefault": "Set as default",
   "settings.agents.viewAll": "View all agents",
-  "settings.agents.noProject": "Open a project to see its agents",
-  "settings.agents.noProjectHint": "Agent teams are configured per project in opencode.json",
+  "settings.agents.project": "Project",
+  "settings.agents.selectProject": "Select project",
+  "settings.agents.noProjects": "No projects found",
+  "settings.agents.noProjectsHint": "Open a project to configure agent teams",
 
   "settings.permissions.tool.read.title": "Read",
   "settings.permissions.tool.read.description": "Reading a file (matches the file path)",

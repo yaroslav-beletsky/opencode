@@ -81,7 +81,6 @@ describe("Agent config update with JSONC preservation", () => {
       },
     }
 
-    const parsed = jsonc.parse(text)
     let edits: jsonc.Edit[] = []
 
     for (const [agentID, agentConfig] of Object.entries(agentUpdates)) {
@@ -212,5 +211,247 @@ describe("Agent config update with JSONC preservation", () => {
 
     const result = await fs.readFile(configPath, "utf-8")
     expect(result.endsWith("\n")).toBe(true)
+  })
+
+  test("handles V1 format with 'agent' key and string model", async () => {
+    const configPath = path.join(testDir, "opencode.json")
+
+    // V1 format with "agent" (singular) and string model
+    const initial = `{
+  // V1 format configuration
+  "agent": {
+    "primary": {
+      "model": "openai/gpt-4",
+      "temperature": 0.7,
+      "prompt": "You are a helpful assistant",
+      "description": "Primary agent"
+    }
+  },
+  "default_agent": "primary"
+}
+`
+    await fs.writeFile(configPath, initial)
+
+    let text = await fs.readFile(configPath, "utf-8")
+    const parsed = jsonc.parse(text)
+
+    // Detect V1 format
+    const isV1 = parsed.agent !== undefined && typeof parsed.agent === "object"
+    const agentsKey = isV1 ? "agent" : "agents"
+
+    expect(isV1).toBe(true)
+
+    // Simulate V2 input that needs to be converted to V1
+    const v2Update = {
+      model: {
+        providerID: "anthropic",
+        model: "claude-3",
+      },
+      request: {
+        body: {
+          temperature: 0.8,
+        },
+      },
+      system: "You are an expert",
+      description: "Updated primary",
+    }
+
+    // Convert to V1 format
+    const toV1Format = (config: any) => {
+      const v1: any = {}
+      if (config.model && typeof config.model === "object") {
+        v1.model = `${config.model.providerID}/${config.model.model}`
+      }
+      if (config.request?.body?.temperature !== undefined) {
+        v1.temperature = config.request.body.temperature
+      }
+      if (config.system !== undefined) {
+        v1.prompt = config.system
+      }
+      if (config.description !== undefined) {
+        v1.description = config.description
+      }
+      return v1
+    }
+
+    const v1Config = toV1Format(v2Update)
+    const existingAgent = parsed[agentsKey].primary
+    const merged = { ...existingAgent, ...v1Config }
+
+    const edits = jsonc.modify(text, [agentsKey, "primary"], merged, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    })
+
+    text = jsonc.applyEdits(text, edits)
+    await fs.writeFile(configPath, text)
+
+    const result = await fs.readFile(configPath, "utf-8")
+    const resultParsed = jsonc.parse(result)
+
+    // Verify V1 format is preserved
+    expect(resultParsed.agent).toBeDefined()
+    expect(resultParsed.agent.primary).toBeDefined()
+    expect(resultParsed.agent.primary.model).toBe("anthropic/claude-3")
+    expect(resultParsed.agent.primary.temperature).toBe(0.8)
+    expect(resultParsed.agent.primary.prompt).toBe("You are an expert")
+    expect(resultParsed.agent.primary.description).toBe("Updated primary")
+
+    // Verify comments are preserved
+    expect(result).toContain("// V1 format configuration")
+  })
+
+  test("preserves {file:...} prompt references in V1 format", async () => {
+    const configPath = path.join(testDir, "opencode.json")
+    const promptPath = path.join(testDir, "prompt.md")
+
+    // Create initial prompt file
+    await fs.writeFile(promptPath, "Original prompt content")
+
+    // V1 format with file reference
+    const initial = `{
+  "agent": {
+    "primary": {
+      "model": "openai/gpt-4",
+      "prompt": "{file:./prompt.md}",
+      "description": "Agent with file prompt"
+    }
+  }
+}
+`
+    await fs.writeFile(configPath, initial)
+
+    let text = await fs.readFile(configPath, "utf-8")
+    const parsed = jsonc.parse(text)
+
+    const agentsKey = "agent"
+
+    // Update with new prompt - should write to file and keep reference
+    const v2Update = {
+      system: "Updated prompt content",
+      description: "Updated description",
+    }
+
+    const toV1Format = (config: any) => {
+      const v1: any = {}
+      if (config.system !== undefined) {
+        v1.prompt = config.system
+      }
+      if (config.description !== undefined) {
+        v1.description = config.description
+      }
+      return v1
+    }
+
+    const v1Config = toV1Format(v2Update)
+    const existingAgent = parsed[agentsKey].primary
+
+    // Check if prompt is file reference
+    const fileMatch = existingAgent.prompt?.match(/^\{file:(.+)\}$/)
+    if (fileMatch && v1Config.prompt) {
+      const filePath = fileMatch[1]
+      const absolutePath = path.isAbsolute(filePath)
+        ? filePath
+        : path.join(testDir, filePath)
+
+      // Write prompt to file
+      await fs.writeFile(absolutePath, v1Config.prompt)
+
+      // Keep the file reference
+      v1Config.prompt = existingAgent.prompt
+    }
+
+    const merged = { ...existingAgent, ...v1Config }
+
+    const edits = jsonc.modify(text, [agentsKey, "primary"], merged, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    })
+
+    text = jsonc.applyEdits(text, edits)
+    await fs.writeFile(configPath, text)
+
+    const result = await fs.readFile(configPath, "utf-8")
+    const resultParsed = jsonc.parse(result)
+
+    // Verify file reference is preserved
+    expect(resultParsed.agent.primary.prompt).toBe("{file:./prompt.md}")
+    expect(resultParsed.agent.primary.description).toBe("Updated description")
+
+    // Verify prompt file was updated
+    const promptContent = await fs.readFile(promptPath, "utf-8")
+    expect(promptContent).toBe("Updated prompt content")
+  })
+
+  test("V1 format with multiple agents and comments", async () => {
+    const configPath = path.join(testDir, "opencode.json")
+
+    const initial = `{
+  // V1 agent team
+  "agent": {
+    "primary": {
+      "model": "openai/gpt-4",
+      "temperature": 0.7,
+      "prompt": "Primary agent",
+      "mode": "primary"
+    },
+    "helper": {
+      // Helper agent for subtasks
+      "model": "openai/gpt-3.5-turbo",
+      "temperature": 0.5,
+      "prompt": "Helper agent",
+      "mode": "subagent",
+      "disable": false
+    }
+  },
+  "default_agent": "primary"
+}
+`
+    await fs.writeFile(configPath, initial)
+
+    let text = await fs.readFile(configPath, "utf-8")
+    const parsed = jsonc.parse(text)
+
+    const isV1 = parsed.agent !== undefined
+    const agentsKey = "agent"
+
+    // Update helper agent
+    const v2Update = {
+      description: "Updated helper description",
+      disabled: true,
+    }
+
+    const toV1Format = (config: any) => {
+      const v1: any = {}
+      if (config.description !== undefined) {
+        v1.description = config.description
+      }
+      if (config.disabled !== undefined) {
+        v1.disable = config.disabled
+      }
+      return v1
+    }
+
+    const v1Config = toV1Format(v2Update)
+    const existingAgent = parsed[agentsKey].helper
+    const merged = { ...existingAgent, ...v1Config }
+
+    const edits = jsonc.modify(text, [agentsKey, "helper"], merged, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    })
+
+    text = jsonc.applyEdits(text, edits)
+    await fs.writeFile(configPath, text)
+
+    const result = await fs.readFile(configPath, "utf-8")
+    const resultParsed = jsonc.parse(result)
+
+    // Verify V1 structure preserved
+    expect(resultParsed.agent).toBeDefined()
+    expect(resultParsed.agent.helper.description).toBe("Updated helper description")
+    expect(resultParsed.agent.helper.disable).toBe(true)
+    expect(resultParsed.agent.helper.model).toBe("openai/gpt-3.5-turbo")
+    expect(resultParsed.agent.primary.model).toBe("openai/gpt-4")
+
+    // Verify top-level comments preserved (inline comments within modified objects may not be)
+    expect(result).toContain("// V1 agent team")
   })
 })
